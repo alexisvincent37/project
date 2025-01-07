@@ -1,0 +1,671 @@
+---
+title: "Étude sur la répartition du temps de travail chez les étudiants de la fac de Tours"
+author: "Alexis et Grégoire"
+date: ""
+output: 
+  html_document:
+      
+    toc: yes
+    toc_float: yes
+    number_section: yes
+    theme: cerulean
+    df_print: paged
+    dev: png
+    keep_md: no
+    standalone: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r options_chunk, echo = FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      message = FALSE,
+                      fig.align = 'center',
+                      warning = FALSE)
+```
+
+
+```{r package}
+# Chargement des outils nécessaires
+
+# Pour les rapports dynamiques
+library(knitr)
+
+# Pour améliorer les tableaux
+library(kableExtra)
+
+# Pour créer des graphiques
+library(ggplot2)
+
+# Pour lire les données
+library(readr)
+
+# Pour manipuler les données de manière simple
+library(dplyr)
+
+#Pour des tests statistiques avancés
+library(car)
+
+```
+
+
+```{r data}
+# Importation des données depuis le fichier CSV
+data <- read_delim("data/sondage_version_finale.csv", delim = ";")
+```
+
+
+```{r fonctions}
+
+# Fonction pour configurer rapidement un tableau avec kable et kable_styling
+Tconfig <- function(x, transp = FALSE, ...) {
+  if (transp == TRUE) {
+    x <- t(x)
+  }
+  
+  x |> kable(
+    align = "c",
+    ...) |>
+    kable_styling(
+      full_width = FALSE,
+      position = "center",
+      bootstrap_options = c("striped", "bordered")
+    )
+} 
+
+# Fonction similaire à Tconfig, mais avec full_width = TRUE
+Tconfigf <- function(x, transp = FALSE, ...) {
+  if (transp == TRUE) {
+    x <- t(x)
+  }
+  
+  x |> kable(
+    align = "c",
+    ...) |>
+    kable_styling(
+      full_width = TRUE,
+      position = "center",
+      bootstrap_options = c("striped", "bordered")
+    )
+}
+
+# Fonction pour effectuer le test de Levene
+perform_levene_test <- function(x, y, z) {
+  
+  # Appliquer le test de Levene en utilisant la fonction leveneTest du package car
+  levene_result <- leveneTest(x ~ y, data = z)
+  
+  # Créer un data frame pour stocker les résultats du test
+  output <- data.frame(
+    Df1 = levene_result$Df[1],    # Degrés de liberté du numérateur
+    Df2 = levene_result$Df[2],    # Degrés de liberté du dénominateur
+    F.Value = levene_result$F[1], # Valeur F du test de Levene
+    Pr.Value = levene_result$Pr[1] # Valeur p associée au test de Levene
+  )
+  
+  # Renommer les colonnes pour des noms plus conviviaux
+  output <- setNames(output, c("Df1", "Df2", "F Value", "Pr(>F)"))
+  
+  # Retourner le résultat
+  return(output)
+}
+
+
+# Fonction pour effectuer une analyse de variance (ANOVA) et retourner les résultats sous forme de dataframe
+perform_anova <- function(x, y, z) {
+  anova_result <- summary(aov(x ~ y, data = z))
+  
+  output <- data.frame(
+    P.value = anova_result[[1]]$"Pr(>F)"[1],
+    F.value = anova_result[[1]]$"F value"[1],
+    Df.Between = anova_result[[1]]$Df[1],
+    Df.Within = anova_result[[1]]$Df[2],
+    Mean.Sq.Between = anova_result[[1]]$"Mean Sq"[1],
+    Mean.Sq.Within = anova_result[[1]]$"Mean Sq"[2]
+  )
+  
+  output <- setNames(output, c("P-value", "F-value", "Df Between", "Df Within", "Mean Sq Between", "Mean Sq Within"))
+  
+  return(output)
+}
+
+# Fonction pour effectuer une régression linéaire et retourner les résultats sous forme de dataframe
+perform_lm <- function(x, y, z) {
+  lm_result <- summary(lm(x ~ y, data = z))
+  
+  output <- data.frame(
+    Coefficients = lm_result$coefficients[, 1],
+    Std.Error = lm_result$coefficients[, 2],
+    t.Value = lm_result$coefficients[, 3],
+    P.value = lm_result$coefficients[, 4]
+  )
+  
+  # Définir des noms plus conviviaux
+  output <- setNames(output, c("Coefficients", "Std. Error", "t Value", "P-value"))
+  
+  return(output)
+}
+
+perform_chi2_test <- function(x, y) {
+  # Effectuer le test du chi2
+  chi2_result <- chisq.test(x, y)
+  
+  # Extraire les résultats pertinents
+  output <- data.frame(
+    P.value = chi2_result$p.value,
+    Chi2.value = chi2_result$statistic,
+    Df = chi2_result$parameter
+  )
+  
+  output <- setNames(output, c("P-value", "Chi2 value", "Df"))
+  
+  return(output)
+}
+
+perform_combined_tests <- function(x, y,quali, z) {
+  aov<-perform_anova(x,y,z)
+  lm<-perform_lm(x,y,z)
+  chi2<-perform_chi2_test(quali,y)
+  
+  output <- data.frame(
+    "Lm P.value(intercpt,y1,y2,yn)" = lm[,4],
+    "Anova P.value" = aov[,1],
+    "Chi2 P.value" = chi2[,1]
+  )
+  
+  names(output)<- c("Lm P.value(intercept,y1,y2,yn)","Anova P.value","Chi2 P.value")
+  
+  output[-1, c(2, 3)] <- NA
+  return(output)
+}
+```
+
+
+```{r setup study frame}
+# Création d'une nouvelle colonne dans data qui corrige les valeurs erronées
+data$`Temps de travail personnel (scolaire) la semaine dernière en heure` <- ifelse(data$`Temps de travail personnel (scolaire) la semaine dernière en heure` < 70, data$`Temps de travail personnel (scolaire) la semaine dernière en heure`, NA)
+
+# Création d'un nouveau tableau (data.frame) avec la colonne corrigée et l'année d'étude
+detu <- data.frame("tps corr" = data$`Temps de travail personnel (scolaire) la semaine dernière en heure`,
+                   "Aetu" = data$`Année d'étude`)
+
+# Mis en facteur de la variable d'année d'étude dans detu
+detu$Aetu<- factor(detu$Aetu)
+
+```
+
+
+# Introduction
+Nous allons présenter une étude afin **de représenter la répartition du temps de travail chez les étudiants de la fac de Tours, sous l'encadrement de madame [Scholler.](https://juliescholler.gitlab.io)**
+
+Pour cela nous nous sommes aidé du sondage donné à la rentrée (principalement répondu par les étudiants en licence d'économie).
+
+L'étude est basée sur l'analyse de `r nrow(data)` individus ayant répondu au sondage.
+
+Pourquoi avoir choisi la représentation du temps de travail ?
+
+Dans le parcours académique, la gestion du temps relève une importance capitale entre les diverses responsabilités qui incombent à chaque étudiant. 
+
+Nous nous sommes ainsi posé la question suivante : Est-ce que le temps de travail personnel (scolaire) est indépendant ou non des autres variables du sondage ?
+
+Les donnés utiliséés pour répondre a cette question sont : 
+
+`r data[,c(1, 2, 4, 5, 7, 9, 11, 12)]`
+
+(Précision: dès lors qu'il faut transformer une variable quantitative en variable qualitative nous prendrons 2 classes, celle avant la mediane (où cette dernière est incluse dans cette première classe) de la distribution et celle après la médiane, en raison de la non uniformité de la distribution, en plus des valeurs extrèmes présentes dans cette dernière.)
+
+## Étude du temps de travail par l'année d'étude
+
+### Prémices
+Une question qui se pose naturellement, savoir si le stade d'avancement dans les années d'étude influence significativement le temps consacré au travail individuel.
+
+C'est cette interrogation que nous cherchons à explorer de manière approfondie. Notre intention est de déterminer, à travers des analyses simples et accessibles, s'il existe réellement des variations dans le temps consacré au travail en fonction des années d'étude, et dans l'affirmative, quelles pourraient en être les implications.
+
+Cette recherche s'inscrit dans une volonté de mieux comprendre les dynamiques inhérentes aux habitudes de travail des étudiants. Nous souhaitons ainsi contribuer à une vision plus claire de la manière dont l'expérience académique évolue au fil des années.
+
+Dans la perspective d'une hypothèse naturelle, on peut supposer que le temps de travail des étudiants augmente avec le nombre d'années d'études.
+
+### Tableaux de contingence
+```{r study frame}
+
+# Création de deux nouvelles colonnes pour répartir les résultats dans 2 catégories pour simplifier la visualisation graphique ultérieure
+
+
+detu <- detu |> mutate(
+  "etu_Travail 4 heures ou moins" = ifelse(detu$tps.corr<= 4,1,0),
+  "etu_Plus 4h par semaine" = ifelse(detu$tps.corr>4,1,0)
+)
+
+
+# Filtrage pour l'année d'étude "L1" et création de nouvelles colonnes en fonction du temps de travail
+
+detu$L1 <- ifelse(detu$Aetu == "L1",detu$tps.corr, NA)
+
+detu <- detu |> mutate(
+  "etuL1_Travail 4 heures ou moins" = ifelse(detu$L1<=4,1,0),
+  "etuL1_Plus 4h par semaine" = ifelse(detu$L1>4,1,0)
+)
+
+
+# Filtrage pour l'année d'étude "L2" et création de nouvelles colonnes en fonction du temps de travail
+
+detu$L2 <- ifelse(detu$Aetu == "L2",detu$tps.corr, NA)
+
+detu <- detu |> mutate(
+  "etuL2_Travail 4 heures ou moins" = ifelse(detu$L2<=4,1,0),
+  "etuL2_Plus 4h par semaine" = ifelse(detu$L2>4,1,0)
+)
+
+
+# Filtrage pour l'année d'étude "L3" et création de nouvelles colonnes en fonction du temps de travail
+
+detu$L3 <- ifelse(detu$Aetu == "L3",detu$tps.corr, NA)
+
+detu <- detu |> mutate(
+  "etuL3_Travail 4 heures ou moins" = ifelse(detu$L3<=4,1,0),
+  "etuL3_Plus 4h par semaine" = ifelse(detu$L3>4,1,0)
+)
+
+
+```
+Tout d'abord nous avons commencé par des **tableaux de contingence en %.**
+
+Et afin d’améliorer la fluidité et la visibilité de notre étude, les effectifs sont 
+divisés en deux groupes, le premier représente les étudiants travaillant 4 heures ou moins par semaine, et le deuxième représente les étudiants travaillant plus de 4 heures par semaine. 
+
+(Précision: certains étudiants avaient répondu qu'ils travaillaient plus de 70 h par semaine, réalité peu probable, donc nous avons transformé ces données en NA (non-attribué) afin d'éviter de fausser notre étude.)
+
+4 heures représente le temps de travail médian des étudiants, avant de choisir la médiane on travaillait avec la moyenne du temps de travail des étudiants qui était de 7h ,toutefois, après une réflexion approfondie, nous avons conclu que c'était plus approprié de travailler avec la médiane (car la distribution était asymétrique, aussi il y avait des valeurs extrmes donc avec ces types de critères la médiane est plus adaptée).
+
+```{r kable etu tot}
+
+# Sélection des colonnes commençant par "etu_" dans detu, puis calcul de la somme de chaque colonne
+tab_etutot <- detu |> select(starts_with("etu_")) |> colSums(na.rm = TRUE)
+
+# Renommer les colonnes pour une meilleure lisibilité
+names(tab_etutot) <- c("Travail 4 heures ou moins", "Plus 4h par semaine")
+
+# Calculer les pourcentages
+tab_etutot100 <- round(tab_etutot * 100 / sum(tab_etutot), 1)
+
+# Création d'un dataframe pour stocker les résultats
+df_etutot100 <- data_frame(
+  "Temps" = names(tab_etutot100),
+  "Effectif" = tab_etutot100
+)
+
+# Configuration du tableau avec kable et ajout d'un en-tête
+df_etutot100 |> Tconfig() |> add_header_above(c("Nombre d'heure d'étude par semaine des étudiant en licence (en %)" = 2))
+
+```
+
+
+
+```{r kable etu L1}
+
+# Sélection des colonnes commençant par "etuL1_" dans detu, puis calcul de la somme de chaque colonne
+tab_etuL1 <- detu |> select(starts_with("etuL1_")) |> colSums(na.rm = TRUE)
+
+# Renommer les colonnes pour une meilleure lisibilité
+names(tab_etuL1) <- c("Travail 4 heures ou moins", "Plus 4h par semaine")
+
+# Calculer les pourcentages
+tab_etuL1100 <- round(tab_etuL1 * 100 / sum(tab_etuL1), 1)
+
+# Création d'un dataframe pour stocker les résultats
+df_etuL1 <- data_frame(
+  "Temps" = names(tab_etuL1100),
+  "Effectif" = tab_etuL1100
+)
+
+# Configuration du tableau avec kable et ajout d'un en-tête
+df_etuL1 |> Tconfig(transp = FALSE) |> add_header_above(c("Nombre d'heure d'étude par semaine des étudiant en L1 (en %)" = 2))
+
+```
+
+
+```{r kable etu L2}
+
+# Sélection des colonnes commençant par "etuL2_" dans detu, puis calcul de la somme de chaque colonne
+tab_etuL2 <- detu |> select(starts_with("etuL2_")) |> colSums(na.rm = TRUE)
+
+# Renommer les colonnes pour une meilleure lisibilité
+names(tab_etuL2) <- c("Travail 4 heures ou moins", "Plus 4h par semaine")
+
+# Calculer les pourcentages
+tab_etuL2100 <- round(tab_etuL2 * 100 / sum(tab_etuL2), 1)
+
+# Création d'un dataframe pour stocker les résultats
+df_etuL2 <- data_frame(
+  "Temps" = names(tab_etuL2100),
+  "Effectif" = tab_etuL2100
+)
+
+# Configuration du tableau avec kable et ajout d'un en-tête
+df_etuL2 |> Tconfig(transp = FALSE) |> add_header_above(c("Nombre d'heure d'étude par semaine des étudiant en L2 (en %)" = 2))
+
+```
+
+```{r kable etu L3}
+
+# Sélection des colonnes commençant par "etuL3_" dans detu, puis calcul de la somme de chaque colonne
+tab_etuL3 <- detu |> select(starts_with("etuL3_")) |> colSums(na.rm = TRUE)
+
+# Renommer les colonnes pour une meilleure lisibilité
+names(tab_etuL3) <- c("Travail 4 heures ou moins", "Plus 4h par semaine")
+
+# Calculer les pourcentages
+tab_etuL3100 <- round(tab_etuL3 * 100 / sum(tab_etuL3), 1)
+
+# Création d'un dataframe pour stocker les résultats
+df_etuL3 <- data_frame(
+  "Temps" = names(tab_etuL3100),
+  "Effectif" = tab_etuL3100
+)
+
+# Configuration du tableau avec kable et ajout d'un en-tête
+df_etuL3 |> Tconfig(transp = FALSE) |> add_header_above(c("Nombre d'heure d'étude par semaine des étudiant en L3 (en %)" = 2))
+
+
+```
+
+```{r kable etu L1L2L3}
+
+# Création d'un dataframe pour regrouper les résultats par année de licence
+df_tpsL <- data_frame(
+  "Temps" = names(tab_etutot),
+  "L1" = tab_etuL1100,
+  "L2" = tab_etuL2100,
+  "L3" = tab_etuL3100
+)
+
+# Configuration du tableau avec kable et ajout d'un en-tête
+df_tpsL |> Tconfig() |> add_header_above(c("Nombre d'heure d'étude par semaine des étudiant par année de licence (en %)" = 4))
+
+```
+
+Suite à l'analyse des tableaux d'effectifs on remarque une différence entre les étudiants en L1,L2,L3.
+
+De plus sur le tableau représentant l'ensemble des étudiants peu importe le nombre d'années d'études on observe que les données sont quasiment semblables à celles du tableau de L1, effet normal car les étudiants de L1 étant plus nombreux (donc plus de réponses venant des L1 sur le sondage) vont tirer les données vers des résultats similaires aux leurs.
+
+On remarque qu'on peut d’ores et déjà apporter un contre-exemple à l'hypothèse présentée dans l'introduction. La différence entre les L1 et les L2 est considérable, environ 10% de L2 travaillent plus que les L1 (en rapport avec la médiane), et quand on arrive au tableau en L3, on peut constater qu'il se rapproche de celui en L1, alors que l'on devrait constater que les étudiants en troisième année travaillent encore plus que ceux en deuxième année, ce qui n'est pas le cas,ce qui vient contredire l'hypothèse.
+
+### Tableau d'effectifs
+```{r kable eff etu, fig.width= 15, fig.height=5}
+
+# Création d'un tableau croisée des données
+
+totetu <- table(detu$tps.corr, detu$Aetu) |> addmargins(
+    margin = 2,
+    FUN = list(Total = sum))
+
+
+# Configuration du tableau avec kableExtra
+totetu |> Tconfigf() |> 
+  # Regrouper les lignes pour "Travail 4 heures ou moins" et "Travail plus de 4 heures"
+  pack_rows("Travail 4 heures ou moins", 1, 12) |> 
+  pack_rows("Travail plus de 4 heures", 13, 37) |> 
+  # Mise en forme des colonnes
+  column_spec(1, bold = TRUE, border_right = TRUE) |> 
+  column_spec(5, italic = TRUE, bold = TRUE, color = "black", background = "gray") |> 
+  column_spec(2, bold = TRUE, color = spec_color(totetu[, 1], end = 0.5, option = "plasma")) |> 
+  column_spec(2, color = "white", bold = TRUE, background = spec_color(totetu[, 1], end = 0.5, option = "plasma")) |> 
+  column_spec(3, color = "white", bold = TRUE, background = spec_color(totetu[, 2], end = 0.5, option = "plasma")) |> 
+  column_spec(4, color = "white", bold = TRUE, background = spec_color(totetu[, 3], end = 0.5, option = "plasma")) |> 
+  # Ajout d'en-têtes
+  add_header_above(c("Le travail par semaine en fonction de l'année d'étude" = 5))
+```
+Ce tableau représente la répartition des effectifs des étudiants en fonction du nombre de temps consacré au travail et de l'année d'étude.
+
+(On remarque une fois de plus que les étudiants de L1 étant plus nombreux, les cases à couleurs prédominantes on besoin de plus d'effectif que les cases pour les L2, L3).
+
+Le temps de travail des L1 est surtout concentré entre 0 et 4 heures, suivant notre hypothèse de départ on s'attend à observer un pattern c'est à dire une migration des couleurs chaudes (là où il y a le plus d'effectif) vers le bas du tableau, c'est le cas en L2 on constate cette migration des couleurs, cependant en L3 ce n'est plus le cas ce qui invalide le pattern et par conséquence notre hypothèse.
+
+### Graphique des densités
+
+```{r density,warning=FALSE}
+
+# Utilisation de ggplot pour créer un graphique de densité
+detu |> 
+  ggplot() + 
+  aes(x = `tps.corr`, fill = Aetu) +
+  geom_density(alpha = 0.5) + # Ajout d'une couche de densité avec transparence
+  labs(title = "Densité du travail personnel des \nétudiants selon leur année d'étude",
+       fill = "Année d'étude",
+       x = "Temps de travail",
+       y = "Fréquence") + 
+  xlim(0, 40) + # Limiter l'axe x de 0 à 40
+  theme_minimal() # Utiliser le thème minimal de ggplot
+
+```
+Suivant notre hypothèse on souhaiterait constaté le pattern suivant à savoir un décalage entre les pics des densités des années d'études en fonction du temps de travail.
+En outre, les densités se superposent, ce qui signifie qu'il n'y a probablement pas de corrélation directe.
+
+### Graphique en violon
+```{r violin,warning=FALSE}
+# Utilisation de ggplot pour créer un graphique de violon (violin plot)
+detu |> 
+  ggplot() + 
+  aes(x = Aetu, y = tps.corr, fill = Aetu) +
+  geom_violin(position = "dodge") + # Ajout d'une couche de violon avec positionnement en dodge
+  labs(title = "Effectifs du travail personnel des \nétudiants selon leur année d'étude",
+       fill = "Année d'étude",
+       x = "",
+       y = "Temps de travail") + 
+  ylim(0, 40) +  # Limiter l'axe y de 0 à 40 
+ theme_minimal() + coord_flip() # Utiliser le thème minimal de ggplot et coordonnées inversées (flip)
+
+```
+Ici la tendance souhaitée serait d'observer un décalage entre les zones fortes des violons, ce qui suggérait une corrélation entre le temps de travail et l'année d'étude, où les étudiants ayant le plus d'années d'études travailleraient plus que ceux qui en n'ont moins.
+Par ailleurs, les zones fortes des violons sont disposées en dessous les unes des autres, ce qui suggère qu'il n'y a peut-être pas de corrélation directe.
+
+Pour conclure sur les graphiques, il est important de souligner qu'ils servent principalement à mettre en avant l'aspect visuel des données.
+Pourtant, ils ne permettent pas de justifier de manière robuste l'hypothèse initiale, c'est pourquoi il est maintenant temps de se tourner vers d'autres méthodes plus calculatoire, dont les tests statistiques.
+
+### Tests
+
+Dans notre étude visant à examiner la relation entre l'année d'étude et le temps de travail des étudiants, nous avons employé une approche statistique diversifiée. Nous avons commencé par l'analyse de la variance (ANOVA) pour évaluer si le temps de travail varie significativement entre les différentes années d'étude. En parallèle, un modèle linéaire (lm) a été appliqué pour modéliser la nature de cette relation, en examinant les coefficients et les p-values associées. Enfin, le test du chi-2 a été utilisé pour déterminer si la distribution des classes de temps de travail est indépendante de l'année d'étude. Cette approche combinée nous permet de tirer des conclusions robustes sur l'impact de l'année d'étude sur les habitudes de travail des étudiants.
+
+```{r remove wrong etu }
+
+# Supprimer les valeurs manquantes dans la colonne tps.corr de detu
+tps.corr.na.rm <- na.omit(detu$tps.corr)
+
+# Supprimer les lignes dans le dataframe data qui correspondent aux lignes supprimées par na.omit
+data <- data[-c(163, 151, 5),]
+
+# Supprimer les lignes dans le dataframe detu qui correspondent aux lignes supprimées par na.omit
+detu <- detu[-c(163, 151, 5),]
+
+# Utilisation de la fonction cut pour créer une nouvelle colonne tps.classe dans le dataframe detu
+# Cette colonne contiendra les catégories basées sur les valeurs de la colonne tps.corr
+detu$tps.classe <- cut(
+  x = detu$tps.corr,          # Variable à découper
+  breaks = c(min(detu$tps.corr), median(detu$tps.corr), max(detu$tps.corr)),       # Points de coupure définissant les limites des classes
+  include.lowest = TRUE,      # Inclure la borne inférieure de la première classe
+  right = TRUE                # Les intervalles sont fermés à droite (borne supérieure incluse)
+)
+```
+
++ Avant d'appliquer une analyse de variance (ANOVA) pour évaluer les différences significatives entre les groupes dans nos données, il est crucial de vérifier l'homogénéité des variances entre ces groupes. Une méthode courante pour effectuer cette vérification est le test de Levene. Ce test statistique évalue si les variances des groupes sont statistiquement équivalentes. En cas de non-homogénéité de la variance, il est souvent approprié d'ajuster l'approche analytique. Ainsi, en intégrant le test de Levene dans notre d'analyse, nous nous assurons de respecter l'hypothèse fondamentale de l'ANOVA et d'obtenir des résultats fiables et interprétables.
+
+```{r lvt}
+Year_lvt<-perform_levene_test(detu$tps.corr,detu$Aetu)
+
+Year_lvt|> Tconfig() |> add_header_above(c("Test de Levene" = 4))
+```
+Les résultats du test de Levene, utilisé pour évaluer l'homogénéité des variances entre les groupes avant d'appliquer une analyse de variance (ANOVA), montrent une statistique de test (F Value) de 0.2421174 avec une valeur p associée (Pr(>F)) de 0.7851915. Avec une valeur p bien supérieure au seuil de signification traditionnel de 0.05, nous ne disposons pas de preuves statistiquement significatives permettant de rejeter l'hypothèse nulle. Ainsi, selon le test de Levene, il n'y a pas de différences significatives entre les variances des groupes. Ces résultats suggèrent que l'homogénéité des variances est probablement respectée, ce qui renforce la validité de l'approche ANOVA que nous envisageons d'appliquer. Par conséquent, nous pouvons procéder à l'ANOVA en toute confiance, en supposant que les conditions requises pour cette analyse sont satisfaites.
+
++ L'ANOVA évalue si les moyennes de trois groupes ou plus diffèrent significativement. Nous l'utilisons pour déterminer si le temps de travail varie selon l'année d'étude.
+ 
+- Hypothèses : H0 (hypothèse nulle) : Les moyennes des groupes sont égales. H1 (hypothèse alternative) : Au moins une moyenne diffère des autres.
+
+
+```{r aov}
+
+# Effectuer l'analyse de la variance (ANOVA)
+Year_aov <- perform_anova(tps.corr.na.rm, detu$Aetu, data)
+
+# Configurer le tableau avec kable et ajouter un en-tête
+Year_aov |> Tconfig() |> add_header_above(c("Test ANOVA entre les années d'études et le temps de travail personnel" = 6))
+```
+Le test ANOVA vise à déterminer si les moyennes entre différents groupes sont statistiquement différentes. En l'occurrence, la p-value élevée (0.7572) associée à ce test indique qu'on ne dispose pas d'assez de preuves pour rejeter l'hypothèse nulle (H0) selon laquelle les moyennes des groupes d'années d'étude sont égales. En d'autres termes, la variation observée dans le temps de travail ne peut pas être attribuée de manière significative à des différences entre les années d'étude. Cette absence de différence statistique suggère que, dans le cadre de cette étude, l'année d'étude ne semble pas avoir un impact significatif sur les niveaux de temps de travail des étudiants.
+
++  Le modèle linéaire évalue la relation linéaire entre une variable dépendante continue et une ou plusieurs variables indépendantes. Dans notre analyse, nous utilisons le modèle linéaire pour comprendre comment l'année d'étude affecte le temps de travail des étudiants.
+  
+- Hypothèses : H0 : Il n'y a pas de relation linéaire significative entre l'année d'étude et le temps de travail. H1 : Il y a une relation linéaire significative.
+
+- Précision : L'année de L1 est prise en référence dans le modèle de regression linéaire pour éviter toute colinéarité parfaite.
+
+```{r lm}
+# Effectuer la régression linéaire multiple
+Year_lm <- perform_lm(tps.corr.na.rm, detu$Aetu, data)
+
+# Configurer le tableau avec kable et ajouter un en-tête
+Year_lm |> Tconfig() |> add_header_above(c("Test de régression linéaire multiple entre les années d'études et le temps de travail personnel par groupe d'étudiant" = 5))
+```
+
+Les résultats de la régression linéaire multiple indiquent que le coefficient pour l'intercept (correspondant probablement à l'année d'étude L1) est de 6.8535 avec une erreur standard de 0.7619, un t-value de 8.9953, et une p-value très faible (1.731952e-16), suggérant que l'intercept est significativement différent de zéro. Cela indique que, pour l'année d'étude L1 (probablement prise comme référence), le temps de travail moyen est significativement différent de zéro. En revanche, les coefficients pour les variables yL2 (année d'étude L2) et yL3 (année d'étude L3) sont de 0.8662 et -0.6279 respectivement, avec des p-values supérieures à 0.05 (0.6084 et 0.6807). Ces résultats indiquent qu'on ne dispose pas d'assez de preuves pour rejeter l'hypothèse nulle selon laquelle les années d'étude L2 et L3 n'ont pas un effet significativement différent de zéro sur le temps de travail, en tenant compte de l'effet de l'année d'étude L1. Ainsi, dans cet échantillon, l'année d'étude semble ne pas avoir un effet significatif sur le temps de travail des étudiants.
+
++ Le test du chi2 est un test de l'indépendance entre deux variables catégorielles. Dans notre étude, il évalue si la distribution des catégories de temps de travail diffère significativement selon l'année d'étude.
+ 
+- Hypothèses : H0 : La distribution des catégories de temps de travail est indépendante de l'année d'étude. H1 : Il y a une dépendance entre ces deux variables.
+
+```{r chi2}
+# Effectuer le test du chi2 entre les classes du temps de travail et l'année d'étude
+Year_C2 <- perform_chi2_test(detu$tps.classe, detu$Aetu)
+
+# Utiliser la fonction Tconfig() pour formater les résultats du test
+# et add_header_above pour ajouter un en-tête au-dessus du tableau
+Year_C2 |>
+  Tconfig() |>
+  add_header_above(c("Test du Chi2 entre les années d'études et le temps de travail personnel" = 4))
+
+
+```
+
+Les résultats du test du chi2 indiquent une p-value de 0.3016 et une statistique de test Chi2 de 2.397, avec 2 degrés de liberté. Ces résultats suggèrent qu'on ne dispose pas de suffisamment de preuves pour rejeter l'hypothèse nulle selon laquelle il n'y a pas de différence significative entre les groupes définis par la médiane du temps de travail en termes de distribution des années d'étude. Autrement dit, dans cet échantillon, il n'y a pas de preuve statistiquement significative d'une association entre les années d'étude et la répartition des étudiants en fonction de leurs temps de travail par rapport à la médiane.
+
+### Conclusion
+
+Dans le cadre de cette étude, nous avons examiné la relation entre l'année d'étude des participants et le temps consacré au travail personnel. L'hypothèse initiale suggérait une corrélation positive, indiquant que le temps de travail personnel augmenterait avec l'avancement des années d'étude.
+
+Cependant, les résultats obtenus ne supportent pas cette hypothèse. L'analyse statistique, incluant des tests tels que l'ANOVA, la régression linéaire et le test du chi2, a démontré l'absence d'une corrélation significative entre l'année d'étude et le temps de travail personnel. Les graphiques de densité et les violons n'ont pas montré de tendance claire indiquant une variation notable du temps de travail en fonction de l'année d'étude.
+
+En conclusion, nos résultats suggèrent que, contrairement à notre hypothèse initiale, il n'y a pas de lien évident entre l'année d'étude et le temps consacré au travail personnel par les participants. 
+
+
+## Étude complémentaires
+
+Maintenant que nous avons résolu notre problématique initiale concernant la corrélation entre le temps de travail personnel et l'année d'étude dans notre sondage, nous nous orientons vers une exploration approfondie en nous concentrant exclusivement sur les tests d'ANOVA, de régression linéaire (lm), et du chi2. Ces tests ont déjà démontré leur robustesse dans notre étude, notamment à travers l'analyse de l'année d'étude. Graphiquement, cette analyse a suggéré que la corrélation entre le temps de travail personnel et l'année d'étude n'était pas significativement forte. Ainsi, en se basant sur ces trois tests, nous chercherons à identifier d'autres variables du sondage pouvant influencer le temps de travail personnel des participants. Cette approche se veut **une extension logique de notre démarche initiale**, mettant l'accent sur des méthodologies éprouvées pour continuer à dévoiler des associations potentielles au sein de notre ensemble de données.
+
+* Pour poursuivre notre études nous allons nous intéresser à ces différentes corrélations :
+  + Le temps d'études selons l'année d'obtention du bac
+  + Le temps d'études selons la spécalité du bac
+  + Le temps d'études selons l’âge 
+  + Le temps d'études selons les bacheliés avant et après la réforme du bac
+  + Le temps d'études selons genre
+  + Le temps d'études selons la filière 
+  + Le temps d'études selons le moyen de transport
+
+De plus pour un gain de temps significatif nous avons regroupé toutes les P.value de ces trois tests au sein d'un seul tableau.
+
+### L'année d'obtention du bac
+
+
+```{r Année bac}
+# Création de la variable qualitative "Année bac"
+data$`Année bac` <- cut(data$`Année d'obtention du baccalauréat ou équivalent`,
+                         breaks = c(min(data$`Année d'obtention du baccalauréat ou équivalent`),median(data$`Année d'obtention du baccalauréat ou équivalent`) , max(data$`Année d'obtention du baccalauréat ou équivalent`)),
+                         include.lowest = TRUE,
+                         right = TRUE
+)
+
+perform_levene_test(detu$tps.corr,data$`Année bac` , detu) |> Tconfig() |> add_header_above(c("Test de Levene" = 4))
+
+perform_combined_tests(detu$tps.corr,data$`Année bac`,detu$tps.classe,detu) |> Tconfig() |> add_header_above(c("Tableau répertorient les tests de regression linéaire, d'anova, et du chi2"=3))
+
+```
+### La spécalité du bac
+
+```{r Spé bac}
+
+perform_levene_test(detu$tps.corr, data$`Filière de votre bac si pas de spécialité`, detu) |> Tconfig() |> add_header_above(c("Test de Levene" = 4))
+
+perform_combined_tests(detu$tps.corr,data$`Filière de votre bac si pas de spécialité`,detu$tps.classe,detu) |> Tconfig() |> add_header_above(c("Tableau répertorient les tests de regression linéaire, d'anova, et du chi2"=3))
+```
+
+
+### L’âge
+```{r age}
+
+data$`age classe` <- cut(data$Age,
+                         breaks = c(min(data$Age),median(data$Age),max(data$Age)),
+                         include.lowest = TRUE,
+                         right = TRUE
+)
+
+perform_levene_test(detu$tps.corr,data$`age classe`, detu) |> Tconfig() |> add_header_above(c("Test de Levene" = 4))
+
+
+perform_combined_tests(detu$tps.corr,data$`age classe`,detu$tps.classe,detu) |> Tconfig() |> add_header_above(c("Tableau répertorient les tests de regression linéaire, d'anova, et du chi2"=3))
+```
+
+### Les bacheliés avant et après la réforme du bac
+```{r reforme}
+data$`reforme bac` <- ifelse(grepl("Bac à spécialités",data$`Filière de votre bac si pas de spécialité`),"après","avant" )
+
+perform_levene_test(detu$tps.corr,data$`reforme bac` , detu) |> Tconfig() |> add_header_above(c("Test de Levene" = 4))
+
+perform_combined_tests(detu$tps.corr,data$`reforme bac`,detu$tps.classe,detu) |> Tconfig() |> add_header_above(c("Tableau répertorient les tests de regression linéaire, d'anova, et du chi2"=3))
+```
+
+### Genre
+```{r genre}
+
+perform_levene_test(detu$tps.corr,data$Genre , detu) |> Tconfig() |> add_header_above(c("Test de Levene" = 4))
+
+
+perform_combined_tests(detu$tps.corr,data$Genre,detu$tps.classe,detu) |> Tconfig() |> add_header_above(c("Tableau répertorient les tests de regression linéaire, d'anova, et du chi2"=3))
+```
+
+
+### Filière
+
+```{r filière}
+
+perform_levene_test(detu$tps.corr,data$Filière , detu) |> Tconfig() |> add_header_above(c("Test de Levene" = 4))
+
+
+perform_combined_tests(detu$tps.corr,data$Filière,detu$tps.classe,detu) |> Tconfig() |> add_header_above(c("Tableau répertorient les tests de regression linéaire, d'anova, et du chi2"=3))
+```
+
+### Moyen de transport
+
+```{r transport}
+data$transport <- ifelse(grepl("à pied",data$`Moyen de transport principal pour venir à la faculté au quotidien`),"à pied"," en véhicule")
+
+perform_levene_test(detu$tps.corr, data$transport , detu) |> Tconfig() |> add_header_above(c("Test de Levene" = 4))
+
+
+perform_combined_tests(detu$tps.corr,data$transport,detu$tps.classe,detu) |> Tconfig() |> add_header_above(c("Tableau répertorient les tests de regression linéaire, d'anova, et du chi2"=3))
+```
+
+### Conclusion 
+
+Après avoir analysé attentivement les données, il apparaît qu'il n'y a aucune relation significative entre le temps de travail personnel et divers facteurs tels que l'année d'obtention du bac, la spécialité du bac, l'âge, le statut de bachelier avant ou après la réforme du bac, le genre, la filière d'études et le moyen de transport.
+
+En d'autres termes, nous n'avons trouvé aucune preuve solide indiquant que ces aspects spécifiques influent de manière significative sur le temps que les participants consacrent à leur travail personnel. Toutes les valeurs de p (p-value) étaient supérieures à 0.05, ce qui signifie que statistiquement, ces facteurs ne semblent pas jouer un rôle déterminant dans la quantité de temps consacrée aux études.
+
+# Conclusion global
+
+Cette étude nous à permis d'en apprendre un peu plus sur les liens émanent entre les variables du sondage. En effet nous avons étudié en profondeur la variable du temps de travail personnel des étudiant de la fac de Tours en nous posant la question suivante : Est-ce que le temps de travail personnel (scolaire) est indépendant ou non des autres variables du sondage ?
+
+Désormer nous pouvons répondre à cette question, le temps de travail personnel est très probablement indépendant des autres variables du sondage.
+
+Pourquoi ? De façon hypothétique cela peut etre due au charactère non rigoureux de la complétion du sondage. Les étudiants répondant au sondage n'était pas controlé une fois le sondage effectué, c'est pour cela qu'ils auraient pu sous évaluer ou sur évaluer leurs travails personnel scolaire, on a pu constater ça dès le début de notre étude avec les valeurs de temps travail personnel allant pour certain jusqu'à 160 heures par semaine.
+
+Pour finir le fait que l'échantillon soit si petit (208 individus et 205 avec les 3 étudiants remplaçés par des NA) peut rendre absent certaines corrélations réellement  présente sur des échantions plus grands.
+
+Ce qui conclu notre étude sur le temps de travail personnel des étudiants de la fac de Tours.

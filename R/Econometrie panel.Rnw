@@ -1,0 +1,240 @@
+\documentclass[a4paper,11pt]{article}
+
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[a4paper, left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm]{geometry}
+\usepackage{times}
+\usepackage{amsmath}
+\usepackage{booktabs} 
+\usepackage{longtable}
+\usepackage{tocloft}
+
+\usepackage{wallpaper}
+
+
+\renewcommand{\cftsecfont}{\large}
+\renewcommand{\cftsubsecfont}{\normalsize}
+\renewcommand{\cftsubsubsecfont}{\small}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor= black,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    citecolor=blue,
+}
+
+\renewcommand{\contentsname}{Table des Matières}
+
+\begin{document}
+
+\SweaveOpts{concordance=TRUE}
+\SweaveOpts{echo=FALSE}
+\ThisULCornerWallPaper{2.52}{img/background.jpg}
+
+\begin{titlepage}
+    \color{yellow}
+    \begin{center}
+    
+        \vspace{2cm}
+        \Huge
+        \textbf{Données de panel sur League of Legend}
+            
+        \vspace{0.5cm}
+        \LARGE
+        Etudes économétrique
+            
+        \vspace{3cm}
+            
+        Projet de recherche réalisé dans le cadre du master 1 MECEN
+            
+        \vspace{7cm}
+        
+        \includegraphics[width=0.5\textwidth]{img/lol.png}
+        
+        \vspace{1cm}
+            
+        \includegraphics[width=0.6\textwidth]{img/logo.png} 
+
+        \vspace{2cm}
+
+        \Large
+        Université de Tours \\
+
+        Par Alexis VINCENT, Iruomachi Iruomah, Yann BROCHET
+
+        2024-2025
+            
+    \end{center}
+    
+\end{titlepage}
+
+<<setup>>=
+library(tidyverse)
+library(plm)
+library(stargazer)
+library(corrplot)
+
+df <- read.csv("datalol.csv")
+
+
+
+
+pooled <- plm(Win ~ teamBaronKills + mort + bountyLevel + inhibitorsLost + factor(knowledge) ,
+              data = df,
+              effect = "individual",
+              model = "pooling",
+              index = c("individual","date"))
+
+
+within <- plm(Win ~ teamBaronKills + mort + bountyLevel + inhibitorsLost + factor(knowledge),
+              data = df,
+              effect = "individual",
+              model = "within",
+              index = c("individual","date"))
+
+random <- plm(Win ~ teamBaronKills + mort + bountyLevel + inhibitorsLost + factor(knowledge),
+              data = df,
+              effect = "individual",
+              model = "random",
+              index = c("individual","date"))
+
+
+cov1<-vcovHC(pooled, method="arellano")
+robust_se1<-sqrt(diag(cov1))
+
+cov2<-vcovHC(within, method="arellano")
+robust_se2<-sqrt(diag(cov2))
+
+cov3<-vcovHC(random, method="arellano")
+robust_se3<-sqrt(diag(cov3))
+
+df$knowledge <- df$knowledge |> as.factor()
+@
+
+<<functions>>=
+library(knitr)
+kableset1 <- function(x, ...) {
+  x |> 
+    kable("latex", booktabs = TRUE, align = "c",digits = 2, ...)
+}
+@
+
+\section{Introduction}
+
+  Pour notre étude nous sommes partis sur quelque chose d’original, nous avons voulu faire des régressions sur un jeu vidéo que l’on affectionne depuis l’enfance. (Ne vous inquiétez pas nous avons fait en sorte que cela soit compréhensible et reste censé au niveau de l’interprétation pour vous). \\
+
+League of Legends est un jeu vidéo où deux équipes de 5 joueurs s'affrontent sur une carte appelée la "Faille de l'Invocateur". L'objectif principal est de détruire la base de l'équipe adverse. La carte est divisée en trois voies : haute, centrale et basse. Chaque équipe commence aux coins opposés de la carte. Pour détruire la base ennemie, il faut d'abord traverser une voie, détruire les trois tourelles qui la composent, ainsi que l'inhibiteur associé. Ensuite, chaque équipe doit détruire les deux tourelles protégeant le cœur de la base ennemie. Une fois toutes ces structures détruites, la base elle-même devient vulnérable et peut être détruite pour remporter la victoire.\\
+
+Les parties durent généralement entre 20 et 40 minutes, et accomplir des objectifs sur la carte permet de gagner des récompenses, offrant ainsi des avantages pour l'équipe qui les réalise. Dans cette étude, nous allons analyser quelles variables influencent la victoire d’une équipe, qu’elles aient un impact positif ou négatif. \\
+
+Si vous souhaitez mieux comprendre le but du jeu, ce n’est pas obligatoire pour saisir l’étude, mais vous pouvez regarder cette petite vidéo sympathique qui explique les bases du jeu : \href{https://www.youtube.com/watch?v=WD9qgO0jo-M}{ici} \\
+
+\section{Variables et modèle}
+
+Nous avons étudié 5 variables en analysant les performances de 20 joueurs très compétitifs évoluant au plus haut niveau de League of Legends avec une partie tout les mois sur une années (qui correspond à une saison de compétition sur ce jeu):
+
+\begin{itemize}
+
+\item teamBaronKills : Cette variable représente le nombre de barons tués par une équipe. Le baron est l’un des plus gros objectifs du jeu et procure un des plus grands avantages (augmentant ainsi les chances de gagner).
+
+\item mort : Cette variable représente le nombre de morts d’un joueur. Se faire tuer par un adversaire donne des ressources à ces derniers, ce qui leur permet de gagner plus facilement.
+
+\item	inhibitorLost : Cette variable représente le nombre d’inhibiteurs perdus. Les inhibiteurs sont des bâtiments proches du cœur de la base des joueurs ; les perdre offre un très gros avantage à l’équipe adverse.
+
+\item	bountyLevel : Cette variable représente la prime qu’un adversaire récupère lorsqu’il tue un joueur. Cette prime augmente si le joueur réalise une très bonne partie (c’est-à-dire, s’il obtient un très bon score).
+
+\item	knowledge : Il existe 5 rôles dans League of Legends : Top, Jungle, Mid, ADC et Support. Cette variable, qui est fixe, indique le rôle de prédilection d’un joueur (expertise au Top, Jungle, Mid, ADC ou Support).
+
+\end{itemize}
+\newpage
+
+\subsection{Voici la distribution statistique de nos variables}
+
+\begin{center}
+<<summary,results=tex>>=
+summary(df[,c(15,5,16,19,25,32)]) |> kableset1()
+@
+\end{center}
+
+\begin{itemize}
+
+\item On peut constater que plus le nombre de parties est grand, plus la probabilité de faire une victoire semble se rapprocher en moyenne de 0,5. En effet, il existe un a priori selon lequel les développeurs du jeu feraient en sorte que l'on gagne au moins la moitié de nos parties (par exemple, en influençant nos équipiers au début de la partie choisie aléatoirement, je le rappelle).
+
+\item Pour la variable de Nashor tués, la moyenne est assez faible en raison du fait que c'est un objectif de fin de partie, donc souvent la partie se finit soit avant (donc sans Nashor tué), soit avec un ou deux grand max. On peut voir que le max ici est de 4, qui est un cas extrême et peu observable dans la réalité.
+
+\item Pour ce qui est de la variable knowledge, on note une sur-représentation du rôle de toplaner dans notre jeu de données.
+
+\end{itemize}
+
+Voici un apperçu des corrélations de nos variables (sans la variable knowledge)
+
+\begin{center}
+
+<<Corrélation,fig=TRUE>>=
+corr <- cor(df[,c(15,5,16,19,25)])
+corrplot(corr, type = "upper", method = "circle", addCoef.col = "black", diag = FALSE)
+@
+
+\end{center}
+
+Nous allons étudier ce modèle:
+
+    \[
+    \resizebox{\textwidth}{!}{$
+    \text{Win}_{it} = \beta_0 + \beta_1 \cdot \text{teamBaronKills}_{it} + \beta_2 \cdot \text{mort}_{it} + \beta_3 \cdot \text{bountyLevel}_{it} + \beta_4 \cdot \text{inhibitorsLost}_{it} + \beta_5 \cdot \text{factor(knowledge)}_{i} + c_{i} + \epsilon_{it}
+    $}
+    \]
+    
+<<model,results=tex>>=
+stargazer(pooled, within, random, type = "latex", se=list(robust_se1,robust_se2,robust_se3),
+          column.labels = c("Poolé", "Within", "Random"), 
+          model.numbers = FALSE,
+          title="Model with standard error correction")
+@
+
+Pour revenir sur nos corrélations, on avait bien un a priori sur les signes de nos variables : en effet, par exemple, avoir un nombre de morts important baisserait nos chances de victoire (plus expliqué dans la section suivante), tuer un Nashor augmenterait les chances de victoire, perdre un inhibiteur diminuerait nos chances de victoire et enfin avoir un score de recherche élevé (bounty level) augmenterait nos chances de victoire. On observe donc que les modèles suivent bien cette logique, pouvant donc induire peut-être un vrai lien de cause à effet entre ces variables et la chance de gagner une partie.
+
+\newpage
+
+\section{Interprétation}
+
+Nous avons realisé une régressions sur 3 modèles : poolés, within et effets aléatoires afin d’observer lequel serait le meilleur pour notre étude.
+
+\begin{itemize}
+
+\item Premièrement, nous pouvons observer que toutes nos variables sont significatives au seuil de 1 \%, hormis pour quelques indicatrices de notre variable knowledge.
+
+\item Éliminer un baron augmente, en moyenne, la chance de victoire de 26 \%, toutes choses égales par ailleurs (comme expliqué dans l’introduction des variables, éliminer un baron offre de gros avantages à son équipe).
+
+\item Mourir une fois de plus diminue en moyenne la chance de victoire de 5 \%, toutes choses égales par ailleurs (c’est dû au fait que mourir donne des ressources à l’adversaire).
+
+\item Si l’indice du bountyLevel augmente de 1 pour un joueur, sa chance de gagner la partie augmente en moyenne de 2,7 \%, toutes choses égales par ailleurs (cela s’explique par le fait qu’un joueur avec un très gros bounty signifie qu’il a un bon score. Il a donc plus de chances de gagner, mais attention : s’il meurt, il offrira beaucoup de ressources à l’adversaire).
+
+\item Perdre un inhibiteur diminue en moyenne les chances de remporter une partie d’environ 22 \%, toutes choses égales par ailleurs. En effet, un inhibiteur est un bâtiment très proche du noyau de la base d’une équipe. Si on le perd, cela offre tout d’abord des avantages à l’équipe adverse et signifie que l’adversaire est très proche de gagner !
+
+\item Il existe un a priori très fort dans League of Legends qui dit que le rôle support est le meilleur pour remporter le plus de parties. Dans notre régression, après avoir mis le rôle adc en référence afin d’éviter tout problème de multicolinéarité parfaite, on peut effectivement observer que la connaissance du rôle support est celui qui augmente le plus la chance de gagner en moyenne.
+
+\item De plus, notre R2 dépasse les 0,5, ce qui est plutôt satisfaisant.
+\end{itemize}
+
+Il est important de noter que la variable expliquée, "Win", est une variable binaire. Or, pour réaliser une régression avec une variable binaire et obtenir des résultats optimaux, il est nécessaire d’étudier la corrélation entre les variables explicatives ainsi que la distribution de la variable dépendante. Cela permet de déterminer s'il est préférable d'appliquer un modèle logit ou probit pour prédire la probabilité de faire une "Win". Dans notre cas, la méthode la plus optimale serait d'utiliser un modèle logit. Cependant, nous avons choisi de ne pas l'appliquer afin de favoriser une interprétation rapide des variables, au détriment de l’optimalité du modèle.\\
+
+ 
+
+\section{Conclusion}
+Nos coefficients sont très similaires, mais les erreurs types dans le modèle à effets aléatoires sont légèrement plus grandes que dans le modèle poolé. Cependant, c’est le modèle within qui possède les erreurs types les plus grandes. On aurait donc pu se diriger vers ce modèle, mais on perd l’information des caractéristiques individuelles, car elles ne varient pas dans le temps. On aurait donc pu conclure sur le choix d’un modèle à effets aléatoires.\\
+
+Cependant, nous sommes dans un cas où nos effets individuels (knowledge d’un rôle, dans ce cas) sont corrélés à nos variables explicatives. En effet, la connaissance parfaite d’un rôle permet d’avoir moins de morts, un meilleur score, et donc un bounty plus élevé, ainsi que de faire plus d’objectifs, ce qui permet de remporter plus de parties. De par cette corrélation, nous devons nous diriger vers le modèle within (à effets fixes).
+
+\newpage
+
+\section{Annexe}
+
+Pour récupérer les données, nous avons conçu un script Python qui interagit avec l'API de Riot Games. Ce script est conçu pour effectuer des requêtes HTML sur les serveurs de Riot Games afin d'extraire les informations relatives aux parties des joueurs. Concrètement, le processus fonctionne de la manière suivante : le script envoie des requêtes via l'API de Riot Games, qui permet d'accéder à des bases de données contenant des informations sur les matchs joués par les joueurs. Ensuite, ces données sont récupérées et analysées, incluant des informations sur les différentes variables associées à chaque partie (comme le nombre de kills, de morts, la durée de la partie, etc.). Les informations sont ensuite extraites et stockées sous une forme structurée pour pouvoir être utilisées dans notre analyse. \\
+
+Il faut noter que cette analyse reste très rudimentaire. En effet, League of Legends est un jeu comportant de nombreuses mécaniques complexes, tant explicites qu'implicites. Il existe donc probablement des méthodes plus rigoureuses pour analyser les chances de victoire. Toutefois, notre objectif était d'obtenir un premier aperçu des facteurs qui peuvent influencer une victoire.\\
+
+De plus, étant donné que cette étude se concentre sur l'élite des joueurs de League of Legends, il est important de préciser que ces derniers jouent exclusivement à leur rôle de prédilection dans toutes leurs parties.
+
+\end{document}

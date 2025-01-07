@@ -1,0 +1,664 @@
+---
+title: "Tissu commercial français"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    css: css/style.css
+runtime: shiny
+---
+```{r}
+palette <- colorRampPalette(c("#005F60", "#05B2A5", "#A2D4D4"))(10)
+palette5 <- colorRampPalette(c("#005F60", "#05B2A5", "#A2D4D4"))(5)
+```
+
+```{r library}
+library(DT)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(leaflet)
+library(leaflet.extras)
+library(shiny)
+library(flexdashboard)
+library(sf)
+library(vegan)
+library(ggrepel)
+library(tidyverse)
+```
+
+```{r importation main df}
+df<- fread("data/data.csv")
+df$com_insee2 <- substr(df$com_insee, 1, 2)
+dfh <- fread("data/dfwheel.csv", header = TRUE)
+dfh <- dfh[,-1]
+df$handi <- dfh
+```
+
+```{r df com}
+dfetu <- df |>   
+  filter(com_nom %in% c(
+    "Clermont-Ferrand",
+    "Dijon",
+    "Rennes",
+    "Tours",
+    "Ajaccio",
+    "Remiremont",
+    "Lille",
+    "Clichy",
+    "Rouen",
+    "Avignon"
+  )) 
+```
+
+
+```{r var reac}
+  comN <- reactiveVal(NULL)
+
+  df_com_reac <- reactive({
+    dfetu[dfetu$com_nom == comN(), ]
+  })
+
+  df_com_percent_reac <- reactive({
+    data <- df_com_reac()
+    
+    freq <- as.data.frame(table(data$type))
+    freq <- freq[freq$Freq != 0,]
+    freq$frequency <- (freq$Freq / sum(freq$Freq)) * 100
+    df_freq_sliced <- freq |> arrange(desc(frequency)) |> slice(1:5)
+    
+    return(df_freq_sliced)
+  })
+
+  dep_code <- reactiveVal(NULL)
+
+  
+  depdata <- reactive({
+    if (is.null(dep_code())){
+      df
+      }
+    else{
+    df |> 
+      filter(com_insee2 == dep_code())
+    }})
+
+  
+  freqno <- reactive({
+    if (is.null(dep_code())){
+      data.frame(
+        Var1 = NA,
+        Freq = NA,
+        frequency = NA
+      )
+    }
+    else {
+      data <- depdata()
+      freq <- as.data.frame(table(data$type))
+      freq <- freq[freq$Freq != 0,]
+      freq$frequency <- (freq$Freq/sum(freq$Freq))
+      top5 <- freq |> arrange(desc(frequency)) |> slice(1:5) 
+      return(top5)
+    }
+  })
+  
+```
+
+# National
+
+```{r valueboxvar}
+
+nbent <- sum(nrow(df))
+df$last_update <- substr(df$last_update,0,4)
+df$last_update <- as.factor(df$last_update)
+df$com_nom <- as.factor(df$com_nom)
+vecyear <- as.numeric(as.character(df$last_update))
+```
+
+## ligne 1 {data-height="150"}
+
+### Entreprises
+
+```{r vb 1}
+valueBox(nbent,
+         icon = "fa-building",
+         color = "danger"
+)
+```
+
+### Période
+
+```{r vb 2}
+valueBox(
+  value = paste(min(vecyear), "-", max(vecyear)), 
+  icon = "fa-solid fa-calendar", 
+  color = "primary"
+)
+```
+
+### Communes
+
+```{r vb 3}
+valueBox(
+  value = length(unique(df$com_nom)), 
+  icon = "fa-solid fa-industry", 
+  color = "info"
+)
+```
+
+## ligne 2
+
+```{r table df10}
+
+df$type <- as.factor(df$type)
+
+freq<- as.data.frame(table(df$type))
+freq<- freq[freq$Freq != 0,]
+freq$frequency<- (freq$Freq/sum(freq$Freq))*100
+
+df_freq_sliced <- freq |> arrange(desc(frequency)) |> slice(1:10)
+```
+
+### Evolution du nombre de commerces rencensés par année {.no-padding}
+
+```{r bar graph année}
+
+ggplotly(ggplot(df, aes(x=df$last_update, fill=as.numeric(last_update))) + 
+scale_fill_gradientn(colors = palette) +
+geom_bar(position = position_dodge(width = 0.9), width = 0.7, show.legend = F)+
+labs(x = "", y = NULL)+
+theme(panel.grid.major = element_blank(),panel.grid.minor = element_blank(),axis.text.y = element_blank(),axis.ticks.y = element_blank(),axis.ticks.x = element_blank(),panel.background = element_rect(fill = "white")),tooltip = c("y"))
+
+
+```
+
+### Répartition des 10 plus grands types de commerces en France {.no-padding}
+
+```{r pie graph 1}
+
+df_freq_sliced <- df_freq_sliced  |> 
+  mutate(Var1 = fct_reorder(Var1, frequency),
+         percentage = round(frequency / sum(frequency) * 100, 1), 
+         ypos = cumsum(frequency) - 0.5 * frequency)  
+
+ggplot(df_freq_sliced, aes(x = "", y = frequency, fill = Var1)) +
+  geom_bar(stat = "identity", width = 1, color = "black") +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  theme(legend.position = "none") +
+
+  scale_fill_manual(
+    values = palette
+  ) +
+
+  geom_text_repel(
+    aes(label = paste0(Var1, ": ", percentage, "%"), y = ypos),
+    nudge_x = 1.2,
+    nudge_y = 0.8,
+    size = 4,
+    segment.color = "#FFBF00",
+    segment.size = 0.7,
+    direction = "both",
+    family = "Comic Sans MS"
+  ) 
+
+         
+```
+
+# Départements {data-orientation=columns}
+
+## col 1
+
+```{r map inte, include=FALSE}
+dep <- st_read("https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/departements.geojson")
+
+dep_code <- reactiveVal(NULL)
+
+ui <- fluidPage(
+  plotOutput("map", click = "plot_click")
+)
+
+server <- function(input, output, session) {
+  
+  selected_dep <- reactiveVal(NULL)
+
+  observeEvent(input$plot_click, {
+    click <- input$plot_click
+    point <- st_as_sf(data.frame(x = click$x, y = click$y), coords = c("x", "y"), crs = st_crs(dep))
+    
+    intersection <- st_intersects(dep, point, sparse = FALSE)
+    if (any(intersection)) {
+      selected <- which(intersection)
+      selected_dep(selected)
+      
+      dept_name <- dep$code[selected]
+      dep_code(dept_name)
+    }
+  })
+
+  output$map <- renderPlot({
+    fill_colors <- rep("lightblue", nrow(dep))
+    if (!is.null(selected_dep())) {
+      fill_colors[selected_dep()] <- "#05B9A2"
+    }
+    
+    ggplot(dep) +
+      geom_sf(aes(fill = fill_colors), color = "black") +
+      scale_fill_identity() +
+      theme_void()
+  })
+}
+
+
+```
+
+### Entreprises
+
+```{r vb ent p2}
+renderValueBox({
+  if (is.null(dep_code())){
+    valueBox(0, icon = "fa-building",color = "danger")
+  }
+  else {
+  valueBox(nrow(depdata()), icon = "fa-building",color = "danger")
+  }
+})
+```
+
+### **Veuillez selectionner un département.**
+
+```{r map}
+shinyApp(ui = ui, server = server)
+```
+
+
+## col 2
+
+### Concentration des commerces dans le département
+
+```{r heat map}
+dep_filtered <- reactive({
+  dep |> filter(code == dep_code())
+})
+
+m <- reactive({ 
+  leaflet() |>
+    addTiles() |>
+    addPolygons(data = dep_filtered(), 
+                 fillColor = "transparent", 
+                 color = "black", 
+                 weight = 1,
+                 opacity = 1, 
+                 fillOpacity = 0) |>
+    addHeatmap(data = depdata(), 
+                lng = ~X, 
+                lat = ~Y, 
+                radius = 15, 
+                blur = 20, 
+                max = 0.05, 
+                group = "Heatmap")
+})
+```
+
+```{r heat map launch}
+renderLeaflet({
+  if (is.null(dep_code()))
+  return()
+  
+  m()
+})
+```
+
+
+### Effectif des types de commerces recensés par année
+```{r bar type annee}
+moda <- reactive({
+  freqno()$Var1
+})
+
+
+filtered_data <- reactive({
+  depdata() |>
+  filter(type %in% moda())
+})
+
+data_summary <- reactive({
+  filtered_data() |>
+  group_by(last_update, type) |>
+  summarise(Count = n(), .groups = 'drop')
+})
+```
+
+```{r}
+
+renderPlotly({
+      if (is.null(dep_code()))
+      return()
+  plot_ly(data_summary(), x = ~last_update, y = ~Count, color = ~type, type = 'bar', 
+        text = ~paste(type, ": ", Count),colors = palette5, 
+        hoverinfo = 'text') |>
+  layout(
+         xaxis = list(title = ""),
+         yaxis = list(title = ""),
+         barmode = 'group')
+})
+```
+
+## col 3
+
+### Diversification des types de commerces
+```{r shannon dep}
+Irenta <- reactive({ 
+  table(depdata()$type)
+})
+
+Hmax <- reactive({
+  log(length(depdata()$type))
+})
+
+H <- reactive({
+  diversity(Irenta(), index = "shannon")
+})
+
+```
+
+
+```{r Gg shannon}
+renderGauge({
+  if (is.null(dep_code())){
+      gauge(0, min = 0, max = 100, symbol = '%', gaugeSectors(
+    success = c(80, 100), warning = c(40, 79), danger = c(0, 39)
+    ))
+  }
+  else {
+  gauge((H()/Hmax())*100, min = 0, max = 100, symbol = '%', gaugeSectors(
+    success = c(80, 100), warning = c(40, 79), danger = c(0, 39)
+  ))
+  }
+})
+```
+
+### Taux de commerces accessible aux personnes en situation de handicap
+
+```{r handi dep}
+handj <- reactive({
+  depdata() |> filter(handi == "oui") |> nrow()
+})
+
+handmax <- reactive({
+  nrow(depdata())
+})
+```
+
+
+```{r Gg handi}
+renderGauge({
+  if (is.null(dep_code())){
+      gauge(0, min = 0, max = 100, symbol = '%', gaugeSectors(
+    success = c(80, 100), warning = c(40, 79), danger = c(0, 39)
+    ))
+  }
+  else {
+  gauge((handj()/handmax())*100, min = 0, max = 100, symbol = '%', gaugeSectors(
+    success = c(80, 100), warning = c(40, 79), danger = c(0, 39)
+  ))
+  }
+})
+```
+
+### Répartition des types de commerces
+
+```{r pie graphe p2}
+renderPlotly({
+  data_processed <- freqno()
+  
+    plot_ly(data = data_processed, labels = ~Var1, values = ~frequency, type = 'pie',  marker = list(colors = c("#005F60", "#028882", "#05B2A5", "#53C3BC", "#A2D4D4"))) |>
+      layout(
+        showlegend = TRUE,
+        legend = list(
+          orientation = 'h',
+          xanchor = 'center',
+          x = 0.5,
+          y = -0.2
+        )
+      )
+})
+
+```
+
+# Communes
+
+
+
+## col 1
+
+
+```{r selector fun}
+
+ui2 <- fluidPage(
+  tags$style(type = "text/css", "
+    .container-fluid {padding: 0px;}
+    .form-group {margin-bottom: 5px;}
+  "),
+
+  selectInput("com_nom", label = NULL, 
+              choices = dfetu$com_nom,
+              width = "100%"),
+  actionButton("reset_button", "Réinitialiser")
+)
+
+
+server2 <- function(input, output, session) {
+  
+  observeEvent(input$com_nom, {
+    comN(input$com_nom)
+  })
+  
+  observeEvent(input$reset_button, {
+    comN(NULL)
+    
+    updateSelectInput(session, "com_nom")
+  })
+}
+
+
+```
+
+### **Veuillez choisir une commune**
+
+```{r selector}
+shinyApp(ui2, server2)
+```
+
+### Diversification des types de commerces
+```{r Shannon com}
+Irentac <- reactive({ 
+  table(df_com_reac()$type)
+})
+
+Hmaxc <- reactive({
+  log(length(df_com_reac()$type))
+})
+
+Hc <- reactive({
+  diversity(Irenta(), index = "shannon")
+})
+
+```
+
+
+```{r Gg shannon com}
+renderGauge({
+  if (is.null(comN)){
+      gauge(0, min = 0, max = 100, symbol = '%', gaugeSectors(
+    success = c(80, 100), warning = c(40, 79), danger = c(0, 39)
+    ))
+  }
+  else {
+  gauge((Hc()/Hmaxc())*100, min = 0, max = 100, symbol = '%', gaugeSectors(
+    success = c(80, 100), warning = c(40, 79), danger = c(0, 39)
+  ))
+  }
+})
+```
+
+### Taux de commerces accessible aux personnes en situation de handicap
+
+```{r handi com}
+handc <- reactive({
+  df_com_reac() |> filter(handi == "oui") |> nrow()
+})
+
+handmaxc <- reactive({
+  nrow(df_com_reac())
+})
+```
+
+
+```{r Gg handi com}
+renderGauge({
+  if (is.null(comN())){
+      gauge(0, min = 0, max = 100, symbol = '%', gaugeSectors(
+    success = c(80, 100), warning = c(40, 79), danger = c(0, 39)
+    ))
+  }
+  else {
+  gauge((handc()/handmaxc())*100, min = 0, max = 100, symbol = '%', gaugeSectors(
+    success = c(80, 100), warning = c(40, 79), danger = c(0, 39)
+  ))
+  }
+})
+```
+
+
+## col 2
+
+
+### Les 5 types de commerce les plus représentés
+
+```{r pie graph p3}
+
+renderPlot({
+    if (nrow(df_com_reac()) == 0)
+      return()
+
+data_processed <- df_com_percent_reac() |>
+  mutate(Var1 = fct_reorder(Var1, frequency),
+         percentage = round(frequency / sum(frequency) * 100, 1), 
+         ypos = cumsum(frequency) - 0.5 * frequency)  
+
+ggplot(data_processed, aes(x = "", y = frequency, fill = Var1)) +
+  geom_bar(stat = "identity", width = 1, color = "black") +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  theme(legend.position = "none") +
+
+  scale_fill_manual(
+    values = palette
+  ) +
+
+  geom_text_repel(
+    aes(label = paste0(Var1, ": ", percentage, "%"), y = ypos),
+    nudge_x = 1.6,
+    nudge_y = 0.8,
+    size = 7,
+    segment.color = "#FFBF00",
+    segment.size = 0.7,
+    direction = "both",
+    family = "Comic Sans MS"
+  ) 
+})
+```
+
+### Recencement des commerces
+
+```{r DT inte}
+renderDataTable({
+datatable(
+  df_com_reac(),
+  options = list(
+    pageLength = 10,
+    lengthMenu = c(5, 10, 15, 20),
+    autoWidth = TRUE,
+    dom = 'Bfrtip',
+    buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+    searchHighlight = TRUE,
+    columnDefs = list(
+      list(className = 'dt-center', targets = "_all"),
+      list(visible = FALSE, targets = c(0, 1))
+    ),
+    scrollX = TRUE,
+    scrollY = "400px",
+    fixedHeader = TRUE
+  ),
+  extensions = c('Buttons', 'FixedHeader'),
+  selection = 'single'
+)
+})
+```
+
+
+# À propos
+
+## row1
+
+### À propos de ce dashboard
+
+**Bienvenue sur ce dashboard interactif**, conçu pour offrir une exploration géographique approfondie du tissu commercial français.
+
+Grâce à une combinaison de **graphiques**, de **cartes** et de **values box**, nous proposons aux commerçants et aux acteurs publics une première analyse de la répartition des commerces selon plusieurs niveaux géographiques :
+
+- **National**
+- **Départemental**
+- **Communal**
+
+Ce dashboard se concentre principalement sur la **diversité commerciale** et la **répartition géographique** des établissements.
+
+Il permet ainsi :
+
+- **Pour les acteurs publics :**
+  - De fournir des éléments d’aide à la décision pour orienter des politiques d'aménagement en fonction des secteurs d'activité
+  - D'identifier les secteurs en déficit ou prédominants dans une zone géographique donnée
+
+- **Pour les commerçants :**
+  - D’analyser le tissu commercial et sa densité géographique pour élaborer une stratégie d’entrée sur le marché
+
+**À noter :** ce dashboard ne prend pas en compte la situation actuelle d’activité ou de cessation des commerces enregistrés depuis 2007.
+
+En somme, cet outil constitue une première ressource précieuse pour accompagner commerçants et acteurs publics dans la prise de décisions adaptées à leurs enjeux et besoins respectifs.
+
+
+### Mode d'emploi
+
+Il n'existe pas d'instructions particulières pour explorer ce dashboard, cependant quelques informations importantes sont à noter :
+
+- **Temporalité des données** : Ce dashboard ne présente pas une réelle actualisation temporelle des données. Les années affichées indiquent les dernières mises à jour des commerces enregistrés dans la base de données. Ainsi, certains commerces peuvent être présents depuis bien plus longtemps. Toutefois, cette dimension temporelle peut s’avérer utile pour analyser l'activité commerciale dans la section "Département" par périodes précises, offrant ainsi des indications plus fiables quant à l’activité des commerces et une vision de l'évolution de leur implantation au fil du temps pour peut-être afficher une tendance. À l’échelle nationale, l’évolution de ces données reflète probablement une croissance importante du nombre de créations de commerces en France.
+
+- **La page départementale :**
+  - Pour afficher les graphiques, il suffit de cliquer sur la carte au niveau du département souhaité.
+  - L'indice de diversification a été calculé grâce à l'**indice de Shannon** ; pour en savoir plus, vous pouvez cliquer [ici](https://fr.wikipedia.org/wiki/Indice_de_Shannon).
+
+- **La page communale :**
+  - Pour naviguer dans cette page, sélectionnez une région via le menu déroulant situé dans le coin supérieur gauche. Cependant, pour des raisons de performance, seules quelques communes sont disponibles.
+
+
+## row2
+
+### Auteurs du projet
+
+Ce projet a été réalisé par :
+
+- **Vincent Alexis** - Responsable d'équipe
+- **Grib Jawad**
+- **Balogoun Abdul**
+
+Ce projet a été réalisé dans le cadre du [Master 1 MECEN](https://mecen.univ-tours.fr/), Économie de l'entreprise et des marchés, à [l'Université de Tours](https://www.univ-tours.fr/).
+
+Pour l'Open Data University [cliquez ici](https://www.opendatauniversity.org/).
+
+Vous pouvez télécharger les données [ici](https://www.data.gouv.fr/fr/datasets/r/3d612ad7-f726-4fe5-a353-bdf76c5a44c2).
+
+Données © les contributeurs d’OpenStreetMap, sous licence [Open Database License](https://www.openstreetmap.org/copyright).
+
+::: footer
+<img src="img/master.png" alt="master" height="70" style="margin-right: 20px;"/> <img src="img/osm.png" alt="osm" height="70" style="float: right;margin-right: 20px;"/>
+:::

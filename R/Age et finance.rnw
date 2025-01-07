@@ -1,0 +1,548 @@
+\documentclass[a4paper,11pt]{article}
+
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[a4paper, left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm]{geometry}
+\usepackage{times}
+\usepackage{amsmath}
+\usepackage{booktabs} 
+\usepackage{longtable}
+\usepackage{tocloft}
+\usepackage{fancyhdr}
+
+
+\renewcommand{\cftsecfont}{\large}
+\renewcommand{\cftsubsecfont}{\normalsize}
+\renewcommand{\cftsubsubsecfont}{\small}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor= black,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    citecolor=blue,
+}
+
+\renewcommand{\contentsname}{Table des Matières}
+
+\pagestyle{fancy}
+\fancyhead{}
+
+\fancyfoot[C]{\includegraphics[width=1cm]{img/logo.jpg}}
+\fancyfoot[L]{\textit{MECEN}}
+\fancyfoot[R]{\thepage}
+
+\begin{document}
+\SweaveOpts{echo=FALSE}
+
+<<Library, results=hide>>=
+library(FactoMineR)
+library(factoextra)
+library(dplyr)
+library(knitr)
+library(corrplot)
+library(patchwork)
+library(data.table)
+library(skimr)
+library(tibble)
+library(corrplot)
+library(xtable)
+library(kableExtra)
+@
+
+<<functions>>=
+kableset1 <- function(x, ...) {
+  x |> 
+    kable("latex", booktabs = TRUE, align = "c",digits = 2, ...)
+}
+@
+
+
+<<Tab données>>=
+df <- read.table("data/resultacm2.csv",
+                 sep = ",",
+                 header = T,
+                 )
+
+df <- df[,c(-9)]
+
+df$inception <- df$inception |> substr(1,4)
+
+df <- df[,-8]
+
+dfacm <- df %>%
+  group_by(companyLabel) %>%
+  summarise(across(everything(), \(x) mean(x, na.rm = TRUE)))
+
+year <- df |> distinct(companyLabel, .keep_all = TRUE)
+year <- year |> arrange(companyLabel)
+
+year <- year$inception
+
+dfacm$inception <- year 
+
+dfacm$inception <- dfacm$inception |> as.numeric()
+
+dfcor <- dfacm
+
+dfacm <- dfacm %>%
+  mutate(revenue = case_when(
+    revenue <= quantile(revenue, 0.33) ~ "Faible",
+    revenue > quantile(revenue, 0.33) & revenue <= quantile(revenue, 0.66) ~ "Moyenne",
+    revenue > quantile(revenue, 0.66) ~ "Élevée"
+  ))
+
+dfacm <- dfacm %>%
+  mutate(inception = case_when(
+    inception <= quantile(inception, 0.33) ~ "Ancienne",
+    inception > quantile(inception, 0.33) & inception <= quantile(inception, 0.66) ~ "Intermédiaire",
+    inception > quantile(inception, 0.66) ~ "Récente"
+  ))
+
+dfacm <- dfacm %>%
+  mutate(employees = case_when(
+    employees <= quantile(employees, 0.33) ~ "Peu",
+    employees > quantile(employees, 0.33) & employees <= quantile(employees, 0.66) ~ "Moyenne",
+    employees > quantile(employees, 0.66) ~ "Beaucoup"
+  ))
+
+dfacm <- dfacm %>%
+  mutate(profit = case_when(
+    profit <= quantile(profit, 0.33) ~ "Faible",
+    profit > quantile(profit, 0.33) & profit <= quantile(profit, 0.66) ~ "Moyenne",
+    profit > quantile(profit, 0.66) ~ "Élevée"
+  ))
+
+dfacm <- dfacm %>%
+  mutate(capital = case_when(
+    capital <= quantile(capital, 0.33) ~ "Faible",
+    capital > quantile(capital, 0.33) & capital <= quantile(capital, 0.66) ~ "Moyenne",
+    capital > quantile(capital, 0.66) ~ "Élevée"
+  ))
+
+dfacm <- dfacm %>%
+  mutate(assets = case_when(
+    assets <= quantile(assets, 0.33) ~ "Faible",
+    assets > quantile(assets, 0.33) & assets <= quantile(assets, 0.66) ~ "Moyenne",
+    assets > quantile(assets, 0.66) ~ "Élevée"
+  ))
+
+
+dfacm <- dfacm %>% 
+  column_to_rownames(var = "companyLabel")
+
+dfcor <- dfcor %>% 
+  column_to_rownames(var = "companyLabel")
+@
+
+\SweaveOpts{concordance=TRUE}
+
+\begin{titlepage}
+    \begin{center}
+    
+        \vspace{2cm}
+        \Huge
+        \textbf{Age et finance}
+            
+        \vspace{0.5cm}
+        \LARGE
+        Etudes de statistiques descriptive
+            
+        \vspace{3cm}
+            
+        Projet de recherche réalisé dans le cadre du master 1 MECEN
+            
+        \vspace{7cm}
+            
+        \includegraphics[width=0.4\textwidth]{img/logo.jpg}
+
+        \vspace{2cm}
+
+        \Large
+        Université de Tours \\
+
+        Par Alexis VINCENT, Jawad GRIB et Abdul BALOGOUN
+
+        2024-2025
+            
+    \end{center}
+    
+\end{titlepage}
+
+
+
+\begin{center}
+    \tableofcontents
+\end{center}
+
+\newpage
+
+\section{Introduction}
+
+L’existence des commerces et la création de nouveaux commerces en France se sont intensifiées ces dernières années. En effet, selon l'INSEE, 1\,027\,831 commerces différents ont été créés en 2022, contre 547\,531 en 2013. Ainsi, en 10 ans, on observe une forte augmentation du nombre de commerces. Cela soulève alors deux questions : quels secteurs sont principalement concernés par cette croissance et comment ces commerces sont-ils répartis sur le territoire français ? Nous avons tenté de répondre à ces questions lors d’un travail précédent, avec la réalisation d’un tableau de bord accessible à ce \href{https://www.data.gouv.fr/fr/reuses/dashboard-tissu-commercial-francais/}{lien}. \\
+
+  Maintenant que nous avons une vue d’ensemble du tissu commercial français, une nouvelle question se pose : comment ces commerces évoluent-ils individuellement ? Existe-t-il des commerces en France présentant des caractéristiques financières et structurelles similaires ? Dans cette étude, nous allons nous intéresser aux liens entre les variables financières et structurelles d’un échantillon d’entreprises présentes en France et rechercher des dynamiques qui pourraient regrouper certaines d’entre elles.
+
+   
+
+\subsection{Contexte}
+
+Dans un travail précédent, nous avons développé un tableau de bord interactif permettant aux collectivités locales de visualiser facilement la répartition et la concentration des types de commerces les plus représentés sur le territoire français (hors DOM/TOM). Ce tableau de bord repose sur une base de données ouverte, fournissant des informations sur plus de 650\,000 entreprises, mise à disposition par OpenStreetMap. \\
+
+Dans le cadre de cette étude, nous nous concentrerons sur un échantillon d'une trentaine d'entreprises françaises pour analyser les liens entre quatre variables financières (chiffre d'affaires, bénéfice, capital, actifs immobilisés) et deux variables structurelles (nombre d'employés et date de création). Nous chercherons également à identifier des similitudes et des dynamiques communes entre ces commerces à partir de ces caractéristiques.
+
+
+\subsection{Problématique}
+
+Nous allons donc nous poser les deux questions suivantes :
+
+\begin{itemize}
+    \item Existe-t-il un lien entre les différentes variables financières ?
+    \item La date de création d'une entreprise a-t-elle un impact sur ses performances financières ?
+\end{itemize}
+
+\subsection{Objectifs}
+
+Pour répondre à cette problématique, nous utiliserons des méthodes d'analyse et de classification non supervisée, telles que :
+\begin{itemize}
+    \item \textbf{L'Analyse en Composantes Principales (ACP)} : Cette méthode permet de réduire la dimensionnalité des données tout en conservant la variance maximale, facilitant ainsi l'interprétation des relations entre les variables.
+    \item \textbf{L'Analyse des Correspondances Multiples (ACM)} : Elle permet d'analyser des jeux de données comprenant plusieurs variables qualitatives, en identifiant des groupes d'individus ou d'éléments partageant des caractéristiques similaires.
+    \item \textbf{La Classification Hiérarchique} : Cette méthode permet de regrouper les individus en classes hiérarchisées en fonction de leur similarité, ce qui permet de découvrir des structures sous-jacentes dans les données.
+\end{itemize}
+
+Ces méthodes nous permettront d'explorer et de comprendre les relations complexes entre les variables financières et d'identifier des tendances et des regroupements significatifs.
+
+\subsection{Méthodologie}
+
+Pour répondre à cette problématique, une approche quantitative sera utilisée. L’analyse des données financières d'entreprises permettra d'identifier les relations entre ces variables au travers d'outils statistiques.
+
+\subsection{Plan}
+
+Dans un premier temps, nous explorerons diverses recherches effectuées sur ces sujets afin de comparer nos hypothèses avec celles des études existantes.\\
+
+Ensuite, nous analyserons nos données en appliquant les méthodes statistiques suivantes :
+
+\begin{itemize}
+    \item \textbf{ACP} : Étude des liens entre les variables financières et la date de création de l'entreprise.
+    \item \textbf{ACM} : Étude des liens entre les variables financières et la date de création de l'entreprise sous forme catégorielle (pour réduire l'impact des chocs temporels et renforcer la robustesse de l'étude).
+    \item \textbf{Clustering} : Application sur les résultats de l'ACM afin d'observer des similitudes sous-jacentes parmi les individus de notre jeu de données.
+\end{itemize}
+
+Et pour terminer, nous conclurons sur les différents résultats.
+
+
+\section{Revues de la littératures}
+
+
+"Le profit découle directement de l'excédent des recettes sur les coûts." - Jean-Baptiste Say (1803) \\
+
+Jean-Baptiste Say nous explique qu'il existe un lien entre le revenu et le chiffre d'affaires assez basique : sans chiffre d'affaires suffisant, les profits sont impossibles. En d'autres termes, cela indique explicitement que le profit est lié positivement au chiffre d'affaires. \\
+
+"Le chiffre d'affaires d'une entreprise est déterminé par la demande effective, et c'est cette même demande qui conditionne les niveaux de profit." - John Maynard Keynes (1936) \\
+
+Keynes nous explique que la demande des consommateurs génère le chiffre d'affaires, et que c'est cette même demande qui est au cœur de tout problème de maximisation de profit, montrant ainsi un lien entre profit et chiffre d'affaires. \\
+
+"Les capitaux propres correspondent à l'ensemble des ressources de la société, ils reflètent sa valeur financière. Il s'agit des fonds apportés par les associés ou actionnaires lors de la création de la société auxquels s'ajoutent les fonds générés par son activité." – Définition des capitaux propres \\
+
+On voit donc que les capitaux propres sont incrémentés des fonds générés par l'activité de la société. En d'autres termes, ces deux variables sont censées être liées. \\
+
+"L'âge de l'entreprise est généralement corrélé positivement à sa rentabilité, car les entreprises plus anciennes bénéficient souvent d'une meilleure stabilité financière, de processus plus affinés et d'une plus grande réputation sur le marché, ce qui leur permet de générer des profits plus élevés." – Penrose, E.T. (1959), \textit{The Theory of the Growth of the Firm} \\
+
+Selon Penrose, les entreprises plus anciennes ont souvent acquis une stabilité, une réputation et des compétences qui leur permettent de mieux gérer les défis économiques et d'optimiser leur rentabilité. Cette maturité leur offre des avantages concurrentiels qui peuvent se traduire par une croissance des profits à long terme. \\
+
+"Les entreprises qui disposent d'un nombre élevé d'employés, en particulier ceux ayant des compétences techniques spécifiques, sont souvent capables de mieux gérer et d'exploiter les actifs immobilisés, augmentant ainsi leur rentabilité." – Barney, J.B. (1991), \textit{Firm Resources and Sustained Competitive Advantage} \\
+
+On note ici un lien entre actifs immobilisés, nombre d'employés et profit engendré par ces derniers. \\
+
+Dans la littérature économique, plusieurs théories mettent en évidence les relations entre les variables financières et les performances des entreprises. Jean-Baptiste Say (1803) souligne que le profit est positivement lié au chiffre d'affaires, affirmant que sans un chiffre d'affaires suffisant, les profits sont impossibles. Keynes (1936) confirme cette idée en expliquant que la demande des consommateurs détermine directement le chiffre d'affaires, et donc les niveaux de profit. De plus, les capitaux propres, qui représentent les ressources de l'entreprise, sont intrinsèquement liés à la rentabilité et au développement de l'entreprise. Par ailleurs, Penrose (1959) et Barney (1991) suggèrent qu'un âge avancé d'entreprise, associé à une base de capital humain plus large et spécialisée, permet une meilleure gestion des actifs immobilisés, ce qui contribue à des profits plus élevés. Ces éléments soulignent non seulement la corrélation entre le capital propre et le profit, mais aussi l'impact de l'âge et de la taille de l'entreprise sur sa rentabilité financière. \\
+
+Ainsi, notre étude visera à observer si ces constatations économiques peuvent être vérifiées dans le cadre de notre analyse des liens entre les variables financières et structurelles des entreprises.
+  
+\section{Hypothèses}
+
+\begin{itemize}
+  \item H1 : Les variables financières des entreprises sont corrélées.
+  \item H2 : L'âge d'une entreprise impacte positivement sa puissance financière.
+\end{itemize}
+
+\section{Préparation des données et analyse}
+
+\subsection{Les variables}
+
+Nous nous intéressons à un jeu de données composé de 31 entreprises présentes sur le territoire français, chacune associée aux six variables suivantes :
+
+\begin{itemize}
+  \item Chiffre d'affaires (Revenue)
+  \item Profit
+  \item Capitaux propres (Capital)
+  \item Actifs immobilisés (Assets)
+  \item Date de création (Inceptions)
+  \item Nombre d'employés (Employees)
+\end{itemize}
+
+Voici un extrait de ce jeu de données :\\
+
+
+<<Tab quanti, results=tex>>=
+cat('\\resizebox{\\textwidth}{!}{')
+kableset1(head(dfcor))
+cat('}')
+@ 
+\\
+
+Pour l'ACM, nous utiliserons le tableau suivant :\\
+
+<<tab quali,results=tex>>=
+cat('\\resizebox{\\textwidth}{!}{')
+kableset1(head(dfacm))
+cat('}')
+@
+\\
+
+Les données de ce tableau ont été transformées en données qualitatives en utilisant les terciles comme séparateurs. \\
+
+Les données sont récupérables avec une requête SparkSQL (en annexe), \href{https://www.data.gouv.fr/fr/datasets/r/3d612ad7-f726-4fe5-a353-bdf76c5a44c2}{avec notre jeu de données initial} sur les codes de la colonne Wikidata.
+
+  
+\subsection{ACP}
+
+Nous allons étudier, dans un premier temps, les corrélations entre les variables :
+
+<<corplot,fig=TRUE,height=3,width=4>>=
+corrrr <- cor(dfcor)
+corrplot(corrrr, type = "upper", method = "shade", addCoef.col = "red", diag = FALSE)
+@
+
+Nous observons un lien étroit entre les variables financières telles que le profit, le capital et le revenu. De plus, l'année de création de l'entreprise semble également corrélée à ces variables. Nous allons donc réaliser une analyse en composantes principales (ACP) pour examiner ces différentes relations. \\
+
+<<acp>>=
+resacp <- PCA(dfcor,quanti.sup = c(2,3),graph = FALSE)
+@
+
+
+Etudes des inerties:
+
+<<intertie>>=
+tabeigacp <- resacp$eig |> t() |> round(2)
+
+rownames(tabeigacp) <- c("Inercie", "Pourcentage d'inertie", "Pourcentage cumulé d'inertie")
+colnames(tabeigacp) <- c(paste0("F", 1:4))
+@
+\begin{center}
+<<tabeigacp,results=tex>>=
+tabeigacp |> kableset1()
+@
+\end{center}
+
+Nous étudierons uniquement les 2 premiers axes qui conservent à la fois 99\% de la part d'inertie cumulée, avec des valeurs propres sur l'axe 1 de 3 et de 1 sur l'axe 2. \\
+
+Étudions les contributions des variables :
+
+<<contribvaracp,fig=TRUE,height=4 >>=
+fviz_contrib(resacp, choice = "var", axes = 1, fill = "grey", color = "black") + ggtitle("Contributions sur l'axe 1") + ylab("Pourcentage d'inertie") + theme(panel.grid = element_blank()) +
+fviz_contrib(resacp, choice = "var", axes = 2, fill = "grey", color = "black") + ggtitle("Contributions sur l'axe 2") + ylab("Pourcentage d'inertie") + theme(panel.grid = element_blank())
+@
+\\
+On observe que l'axe 1 semble capter les variables plutôt financières, tandis que l'axe 2 semble quant à lui capter les variables structurelles de l'entreprise.\\
+
+Analysons maintenant le graphique des variables :
+
+
+\begin{center}
+<<varplot, fig=TRUE,height=4>>=
+plot.PCA(resacp,choix = "var") + ggtitle("Graphiques des variables") + theme(panel.grid = element_blank())
+@
+\end{center}
+
+On observe que les variables financières (revenus, capital, profit) semblent corrélées lorsqu'on compare les entreprises en fonction de leur niveau d'actifs. De plus, les variables quantitatives supplémentaires révèlent une relation entre le nombre d’employés et les actifs. Enfin, la date de création de l’entreprise semble être légèrement liée aux variables financières. \\
+
+L'axe 1 semble discriminer les entreprises selon leur puissance financière, avec les moins puissantes financièrement situées dans la partie négative et les plus puissantes dans la partie positive. On peut donc supposer que cet axe représente, en composante principale, la puissance financière des entreprises. \\
+
+L'axe 2, quant à lui, semble traduire une différenciation basée sur le niveau des actifs.\\
+
+Cette analyse en composantes principales (ACP) nous fournit un premier élément de réponse quant aux corrélations entre les variables financières. Il est également intéressant de noter que les actifs semblent légèrement corrélés, à la fois au nombre d’employés et à la date de création de l’entreprise.\\
+
+Il reste maintenant à déterminer si la puissance financière est positivement corrélée à l’ancienneté des entreprises. Pour visualiser cela, nous allons représenter les individus en les habillant avec la variable inception (date de création).\\
+
+\begin{center}
+<<pca ind 1, fig=TRUE,height=4,width=6>>=
+fviz_pca_ind(resacp, repel = TRUE, col.ind = resacp$call$X[, "inception"],select.ind = list(contrib = 10 ),gradient.cols = c("blue", "yellow", "red")) + ggtitle("Nuages des individus")
+@
+\end{center} 
+
+On observe que quelques individus surclassent la majorité de la population, notamment la Banque industrielle et commerciale de Chine, Sony, Honda et Samsung Electronics.\\
+
+Cela est probablement dû au fait que ces individus possèdent des valeurs extrêmes par rapport au reste de la population. Nous remarquons également que la date de création d'une entreprise ne semble pas liée à sa puissance financière.\\
+
+Pour atténuer l'impact de ces valeurs extrêmes, nous allons transformer les variables quantitatives en variables qualitatives. Ensuite, nous procéderons à une Analyse des Correspondances Multiples (ACM) afin d'explorer la répartition des entreprises selon leurs caractéristiques communes.\\
+
+\subsection{ACM}
+
+Nous allons donc, comme pour l'ACP, commencer par analyser le tableau des inerties.\\
+
+\begin{center}
+<<tabinertieacm,results=tex>>=
+resacm <- MCA(dfacm, quali.sup = c(2,3),graph = FALSE)
+tabeigacm <- resacm$eig |> t() |> round(2)
+
+rownames(tabeigacm) <- c("Inercie", "Pourcentage d'inertie", "Pourcentage cumulé d'inertie")
+colnames(tabeigacm) <- c(paste0("F", 1:8))
+tabeigacm |> kableset1()
+@
+\end{center}
+
+Nous allons étudier ici l'axe 1 et l'axe 2, qui expliquent à eux seuls plus de 70\% de l'inertie.\\
+
+
+Voici les variables qui contribuent le plus à chaque axes:\\
+
+\begin{center}
+
+<<contribvar,fig=TRUE,height=4 >>=
+fviz_contrib(resacm, choice = "var", axes = 1, fill = "grey", color = "black") + ggtitle("Contributions sur l'axe 1") + ylab("Pourcentage d'inertie") + theme(panel.grid = element_blank()) +
+fviz_contrib(resacm, choice = "var", axes = 2, fill = "grey", color = "black") + ggtitle("Contributions sur l'axe 2") + ylab("Pourcentage d'inertie") + theme(panel.grid = element_blank())
+@
+
+\end{center}
+
+Nous ne pouvons observer de schéma particulier entre les modalités des variables. Le plan semble regrouper les individus selon des profils précis.\\
+
+Nous allons maintenant étudier le graphique des corrélations des variables.\\
+
+\begin{center}
+<<graph cor, fig=TRUE,height=4>>=
+plot.MCA(resacm,axes = c(1,2), choix='var') + 
+  theme(panel.grid = element_blank()) + ggtitle("Corrélation des variables avec les axes 1 et 2")
+@
+\end{center}
+Ce graphique nous montre que les deux axes semblent expliquer en même temps les variables financières. On suppose par ailleurs que, grâce à leur proximité, elles semblent être liées les unes aux autres.\\
+
+En revenant sur les résultats des graphiques précédents, l'axe 1 semble davantage capter les valeurs extrêmes des individus (élevées et faibles), tandis que l'axe 2 semble plutôt représenter leur niveau de profil moyen entre les variables financières. Pour mieux visualiser cela, nous allons afficher le graphique des variables.\\
+
+\begin{center}
+<<graph var,fig=TRUE,height=4>>=
+fviz_mca_var(resacm, axes = c(1,2) , repel = T, col.var = "cos2") + ggtitle("Nuage des modalités")
+@
+\end{center}
+Nous observons ici la séparation des individus en 3 groupes principaux : les profils faibles (à droite), moyens (en haut) et élevés (à gauche). Par ailleurs, on peut noter que le nombre d'employés semble tendre vers une valeur élevée selon la puissance financière (ce qui est assez logique, car avec une puissance financière faible, on ne peut pas payer beaucoup d'employés). Cependant, l'année de création ne semble pas suivre notre hypothèse de départ, à savoir que plus une entreprise est ancienne, plus elle a une puissance financière élevée.\\
+
+Grâce à ce graphique et aux résultats de l'ACP précédemment effectuée, nous pouvons confirmer que les variables financières, à savoir les actifs, le capital, le profit et le chiffre d'affaires, sont liées entre elles.\\
+
+Pour pouvoir valider notre seconde hypothèse, nous allons visualiser les individus sur ce plan en les habillant par années de création.\\
+
+\begin{center}
+<<graph ind,fig=TRUE,height=4>>=
+fviz_mca_ind(resacm, repel = TRUE, col.ind = resacm$call$X[, "inception"], palette = "jco") + ggtitle("Nuage des individus")
+@
+\end{center}
+Nous pouvons voir que les entreprises anciennes se répartissent davantage dans la partie haute/gauche du plan. On pourrait donc supposer que notre hypothèse de départ sur l'âge d'une entreprise et sa puissance financière est vérifiée. Cependant, comme on peut observer, les entreprises récentes et intermédiaires sont, quant à elles, réparties uniformément sur tout le plan. Nous sommes donc dans l'impossibilité de généraliser cette hypothèse au vu des résultats de l'ACP et de l'ACM. Elle est donc rejetée.\\
+
+
+\subsection{Clustering}
+
+<<hcpc>>=
+HCPC <- HCPC(resacm, graph = FALSE, consol = T)
+@
+
+Dans cette section, nous allons classer les individus selon leurs caractéristiques communes. Pour cela, nous utiliserons une méthode de clustering hiérarchique sur notre ACM. Afin de choisir le nombre de clusters optimal, nous étudierons l'inertie inter-cluster.\\
+
+\begin{center}
+<<intertie,fig=TRUE,height=4>>=
+plot(HCPC,choice = "bar",title = "Inertie inter-cluster")
+@
+\end{center}
+Nous observons que passer de 2 à 3 clusters génère un gain d'inertie encore très satisfaisant. Nous allons donc opter pour une classification en 3 classes.\\
+
+Ainsi, voici les modalités qui construisent ces clusters :\\
+
+
+\begin{center}
+<<modclust 1, results=tex>>=
+HCPC$desc.var$category$'1' |> round(2) |> kableset1()
+@
+
+
+<<modclust 2, results=tex>>=
+HCPC$desc.var$category$'2' |> round(2) |> kableset1()
+@
+
+<<modclust 3, results=tex>>=
+HCPC$desc.var$category$'3' |> round(2) |> kableset1()
+@
+\end{center}
+Nous remarquons que cette répartition suit principalement un schéma de groupes aux puissances financières élevées, moyennes dans un autre et faibles dans le dernier.\\
+
+Voici comment se répartissent les individus dans les clusters :\\
+
+\begin{center}
+<<cluster 1 ind,results=tex>>=
+indcla1 <- HCPC$desc.ind$para$'1' |> as.data.frame()
+colnames(indcla1) <- "Cluster1"
+indcla1 |>  kableset1()
+@
+
+<<cluster 2 ind,results=tex>>=
+indcla2 <- HCPC$desc.ind$para$'2' |> as.data.frame()
+colnames(indcla2) <- "Cluster2"
+indcla2 |>  kableset1()
+@
+
+<<cluster 3 ind,results=tex>>=
+indcla3 <- HCPC$desc.ind$para$'3' |> as.data.frame()
+colnames(indcla3) <- "Cluster3"
+indcla3 |>  kableset1()
+@
+\end{center}
+
+En se concentrant sur le secteur de l'automobile, étant prédominant dans notre jeu de données. Nous allons essayer de comprendre comment et pourquoi ces entreprises ont était classées ensembles d'un point de vue économique léger. \\
+
+Dans le cluster à la structure financière la plus solide, on retrouve Honda. Ce choix est cohérent, car Honda est l'un des leaders mondiaux de l'automobile, avec une production de masse destinée à un large public. Sa stratégie consiste à proposer des voitures accessibles au plus grand nombre, ce qui en fait une marque "tout public", représentative d'une structure financière robuste.\\
+
+Dans le cluster à la structure financière plutôt moyenne, on retrouve Ford, qui adopte une approche similaire à celle de Honda : proposer des voitures accessibles, mais en ciblant principalement le marché européen. Ford se distingue par son ancrage local et son positionnement concurrentiel dans la région, ce qui lui permet de maintenir une rentabilité stable, bien que sa structure financière ne soit pas aussi solide que celle de Honda.\\
+
+Enfin, dans le cluster à la structure financière la plus faible, nous trouvons Ferrari. Cette marque, bien que très profitable, ne suit pas le modèle de production de masse. Ferrari se distingue par son approche de niche, visant un public plus restreint mais prêt à payer un prix premium pour des véhicules exclusifs. Cette stratégie, axée sur des marges élevées plutôt que sur un volume de production élevé, peut expliquer sa structure financière moins développée en comparaison avec des géants comme Honda ou Ford. Il est important de noter que cela ne signifie pas que Ferrari ait des profits faibles ; au contraire, ses marges par véhicule sont très élevées, mais la production limitée influe sur sa structure financière globale.\\
+
+
+
+\section{Discution}
+
+Nous souhaiterions tout de même revenir sur la méthode de récupération des données. En effet, le fait d'ajouter des variables dans la requête SQL de Wikidata nous contraint à réduire le nombre d'individus récupérés. Pour régler ce problème, nous pourrions peut-être réduire le nombre de variables choisies, comme par exemple le chiffre d'affaire et le profit, qui sont très liés, afin d'inclure plus d'individus. La méthode utilisée pour récupérer la base de données sera détaillée en annexe.\\
+
+Il existe également un problème concernant la temporalité des variables. En effet, les variables sont récupérées selon différentes temporalités, car elles ne sont pas forcément renseignées pour toutes les entreprises à la même année. Ainsi, un profit réalisé en 2019 ou 2020 a pu subir un choc économique dû au COVID, comparé à des entreprises avec un revenu renseigné à des périodes plus sereines.\\
+
+Pour finir, il est possible que sur le site wikidata, certaines variables étaient renseignées plusieur fois à des dates différentes. Pour avoir une observation par entreprises nous avons donc fais la moyennes pour toutes les variables.\
+
+  
+\section{Conclusion}
+
+Notre étude visait à examiner les relations entre certaines variables financières et structurelles des entreprises, en s'appuyant sur des hypothèses issues de la littérature économique. Plus spécifiquement, nous avons cherché à valider les hypothèses suivantes :\\
+
+\begin{itemize}
+  \item \textbf{H1 :} Les variables financières des entreprises sont corrélées. 
+  \item \textbf{H2 :} L'âge d'une entreprise impacte positivement sa puissance financière. 
+\end{itemize}
+
+Pour répondre à ces questions, nous avons mobilisé des méthodes quantitatives, notamment l'Analyse en Composantes Principales (ACP), l'Analyse des Correspondances Multiples (ACM) et la Classification Hiérarchique. Ces outils nous ont permis d'explorer les relations entre les variables financières et structurelles des entreprises, tout en identifiant des regroupements significatifs.\\
+
+Les résultats obtenus montrent que :\\
+\begin{itemize}
+  \item Les variables financières des entreprises présentent effectivement des corrélations significatives, confirmant \textbf{H1}. Ces corrélations soulignent l'interdépendance entre différents indicateurs économiques, comme le chiffre d'affaires, le profit et les capitaux propres. 
+  \item En revanche, l'hypothèse \textbf{H2}, qui postulait une influence positive de l'âge sur la puissance financière des entreprises, n'a pas été confirmée. Nos analyses révèlent que l'âge d'une entreprise n'est pas systématiquement corrélé à une meilleure performance financière ou à une stabilité accrue. 
+\end{itemize}
+
+Ces résultats apportent des nuances aux théories économiques étudiées. Bien que certains liens économiques classiques, tels que ceux entre le chiffre d'affaires et le profit, ou entre les capitaux propres et la rentabilité, soient validés, d'autres facteurs, comme l'âge de l'entreprise, semblent jouer un rôle plus complexe ou contextuel dans la performance financière.\\
+
+Ainsi, cette recherche souligne l'importance d'une approche empirique pour vérifier la pertinence des modèles théoriques. Dans une perspective future, il serait intéressant d'explorer les facteurs modérateurs, tels que le secteur d'activité ou les contextes économiques, qui pourraient influencer la relation entre l'âge et la performance des entreprises. De plus, l'intégration de données longitudinales permettrait d'affiner ces analyses et d'examiner les évolutions temporelles de ces relations.
+
+\section{Annexe}
+
+\subsection{Récupération des données}
+
+Pour récupérer les données issues de notre base de données, nous nous sommes appuyés sur un code Wikidata disponible pour une partie des entreprises présentes sur le territoire français. Wikidata est une plateforme similaire à Wikipédia, mais dédiée aux données structurées, notamment celles concernant les entreprises. Elle recense des entreprises identifiables grâce à un code unique, ainsi que des informations les concernant, telles que le chiffre d'affaires, le profit, etc., également identifiables par des codes spécifiques.\\
+
+Ces codes nous permettent, grâce au package WikidataQueryServiceR, d'effectuer des requêtes en SparkSQL pour récupérer les données nécessaires.\\
+
+Nous avons ainsi développé un script permettant de tester, pour chaque code Wikidata, si les variables utilisées dans cette étude sont disponibles pour chaque société. Si une seule variable est manquante, la société n'est pas ajoutée au jeu de données.
+
+
+\end{document}
